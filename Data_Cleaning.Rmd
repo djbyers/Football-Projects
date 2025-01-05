@@ -1,0 +1,284 @@
+---
+title: "Quantifying Confusion"
+subtitle: "How NFL Defenses Leverage Unpredictability Within Pass Rush Schemes"
+author: "Douglas Byers"
+date: "12/8/2024"
+output:
+  html_document: default
+  pdf_document:
+    fig_height: 2
+    fig_width: 3.5
+editor_options: 
+  chunk_output_type: inline
+---
+## Data Cleaning
+  
+# 1) Setup and Load Packages, Libraries, and Data
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#install.packages("dplyr")
+#install.packages("nflfastR")
+#install.packages("nflreadr")
+#install.packages("nflplotR")
+#install.packages("tidyverse")
+#install.packages("vip")
+#install.packages("randomForest")
+#install.packages("purrr")
+#install.packages("gbm")
+#install.packages("mosaic")
+#install.packages("glmnet")
+#install.packages("caret")
+#install.packages("ggrepel")
+#install.packages("lubricate")
+#install.packages("hms")
+
+library(dplyr)
+ (library(readr))
+ (library(mosaic))
+ (library(tidyverse))
+ (library(glmnet))
+ (library(class))
+ (library(modelr))
+ (library(lubridate))
+ (library(caret))
+ (library(vip)) 
+ (library(gbm))
+ (library(purrr))
+library(randomForest)
+library(lubridate)
+library(hms)
+```
+
+
+```{r}
+#Read in the data
+tracking_w1 <- read.csv("~/Big_Data_Bowl/nfl-big-data-bowl-2025/tracking_week_1.csv")
+tracking_w2 <- read.csv("~/Big_Data_Bowl/nfl-big-data-bowl-2025/tracking_week_2.csv")
+tracking_w3 <- read.csv("~/Big_Data_Bowl/nfl-big-data-bowl-2025/tracking_week_3.csv")
+tracking_w4 <- read.csv("~/Big_Data_Bowl/nfl-big-data-bowl-2025/tracking_week_4.csv")
+tracking_w5 <- read.csv("~/Big_Data_Bowl/nfl-big-data-bowl-2025/tracking_week_5.csv")
+tracking_w6 <- read.csv("~/Big_Data_Bowl/nfl-big-data-bowl-2025/tracking_week_6.csv")
+tracking_w7 <- read.csv("~/Big_Data_Bowl/nfl-big-data-bowl-2025/tracking_week_7.csv")
+tracking_w8 <- read.csv("~/Big_Data_Bowl/nfl-big-data-bowl-2025/tracking_week_8.csv")
+tracking_w9 <- read.csv("~/Big_Data_Bowl/nfl-big-data-bowl-2025/tracking_week_9.csv")
+
+plays <- read_csv("~/Big_Data_Bowl/nfl-big-data-bowl-2025/plays.csv")
+
+player_pbp <- read_csv("~/Big_Data_Bowl/nfl-big-data-bowl-2025/player_play.csv")
+
+players <- read_csv("~/Big_Data_Bowl/nfl-big-data-bowl-2025/players.csv")
+
+games <- read_csv("~/Big_Data_Bowl/nfl-big-data-bowl-2025/games.csv")
+```
+
+
+```{r}
+#Create one table with all the tracking data combined
+tracking_full <- rbind(tracking_w1, tracking_w2, tracking_w3, tracking_w4, tracking_w5, tracking_w6, tracking_w7, tracking_w8, tracking_w9)
+
+tracking_full
+```
+
+```{r}
+write_csv(tracking_full, "full_tracking_data.csv")
+```
+
+
+```{r}
+#Build a dataset that contains the location that the ball is snapped from for each play. This location will then be used for our coordinate standardization later on
+
+ball <- tracking_full %>%
+  group_by(gameId, playId)%>%
+  filter(displayName == 'football')%>%
+  filter(event == 'ball_snap')%>%
+  select(gameId, playId, x, y, playDirection)%>%
+  rename(ball_x = x, ball_y = y)
+
+ball
+
+```
+
+
+
+```{r}
+#Build a dataset that has the time of line_set and ball_snap for each play. This will help us parse out which frames within the tracking data we don't need, and will also be used in calculating the time_to_snap variable later on
+
+time <- tracking_full %>%
+  group_by(gameId, playId)%>%
+  filter(event == 'line_set' | event == 'ball_snap')%>%
+  select(gameId, playId, event, time)%>%
+  distinct(gameId, playId, event, .keep_all = TRUE)%>%
+  pivot_wider(names_from = event, values_from = time)%>%
+  mutate(line_set_time = as_hms(sub('.* ', '',line_set)),
+         ball_snap_time = as_hms(sub('.* ', '',ball_snap)))
+
+time
+```
+
+
+
+```{r}
+#select only relevant rows for game context
+
+plays_data <- plays %>%
+  select(gameId, playId, defensiveTeam, quarter, down, yardsToGo, yardlineNumber, gameClock, absoluteYardlineNumber, passResult, qbSpike, playDescription)
+
+plays_data
+```
+
+
+```{r}
+#Select relevant rows to have pass rusher variable. This will be our response variable when modeling
+player_pbp_data <- player_pbp %>%
+  select(gameId, playId, nflId, teamAbbr, wasInitialPassRusher,causedPressure)
+
+player_pbp_data
+```
+
+
+```{r}
+#Select player positions
+
+players_data <- players%>%
+  select(nflId, position)
+
+players_data
+```
+
+
+```{r}
+#Select game week
+
+games_data <- games%>%
+  select(gameId, week)
+
+games_data 
+```
+
+
+
+```{r}
+track_players <- tracking_full %>%
+  select(gameId, playId, nflId, displayName, frameId, time, club, x, y, s, a, dis, o, dir)
+
+track_players
+
+```
+
+
+
+
+
+```{r}
+#Join all the relevant data frames together
+
+full_data <- track_players %>%
+  left_join(games_data,
+            join_by(x$gameId == y$gameId))%>%
+  left_join(players_data, 
+            join_by(x$nflId == y$nflId))%>%
+  left_join(ball,
+            join_by(x$gameId == y$gameId, x$playId == y$playId))%>%
+  left_join(time,
+            join_by(x$gameId == y$gameId, x$playId == y$playId))%>%
+  left_join(player_pbp_data,
+            join_by(x$gameId == y$gameId, x$playId == y$playId, x$nflId == y$nflId))%>%
+  left_join(plays_data,
+            join_by(x$gameId == y$gameId, x$playId == y$playId))
+
+
+full_data
+```
+
+
+
+
+```{r}
+#Find all plays where WR are playing defense. This will be used to filter these plays out of the final result.
+
+wr_play <- full_data %>%
+  filter(time >= line_set & time < ball_snap)%>%
+  filter(!is.na(passResult))%>%
+  filter(club == defensiveTeam)%>%
+  filter(gameId== 2022110610 & playId == 4162)
+
+wr_play
+```
+
+
+
+
+```{r}
+
+full_data_final <- full_data%>%
+  filter(time >= line_set & time < ball_snap)%>% ##Filter down to relevant time points
+  filter(!is.na(passResult))%>% ##Take out non-dropback plays
+  filter(club == defensiveTeam)%>% ##Remove offensive players
+  filter(!is.na(wasInitialPassRusher))%>% ## Remove rows where our response variable is NA
+  filter(qbSpike != "TRUE")%>% ## Remove QB spike plays
+  setdiff(wr_play)%>%
+  mutate(standard_x = ifelse(playDirection == 'left', -(x - ball_x), x - ball_x), #standardize x-coordinates
+         standard_y = ifelse(playDirection == 'left', -(y - ball_y), y - ball_y), #standardize y-coordinates
+         standard_dir = ifelse(playDirection == 'left', (dir + 180)%%360, dir), #standadrize direction
+         standard_o = ifelse(playDirection == 'left', (o +180)%%360, o), #standardize orientation
+         yards_to_EZ = absoluteYardlineNumber - 10, #Absolute yardline number gives you the distance from your point on the field to the back of the target endzone. We only care about the front of the end zone
+         time_extract = as_hms(sub('.* ', '',time)),
+         time_to_snap = as.numeric(ball_snap_time - time_extract))%>% #create time to snap
+  select(week, gameId, playId, nflId, displayName, position, frameId, teamAbbr, quarter, down, yardsToGo, yardlineNumber, yards_to_EZ, gameClock, time_to_snap, standard_x, standard_y, standard_dir, standard_o, s, dis, a, wasInitialPassRusher)
+
+full_data_final
+```
+
+
+
+```{r}
+write_csv(full_data_final, "full_data_final.csv")
+```
+
+
+
+```{r}
+#Build Dataset for fitting modeling method 2 - the averages of the tracking data points
+
+full_data_averages <- full_data_final %>% 
+  group_by(gameId, playId, nflId)%>%
+  mutate(av_x = mean(standard_x),
+         av_y = mean(standard_y),
+         av_dir = mean(standard_dir),
+         av_or = mean(standard_o),
+         av_speed = mean(s),
+         av_dis = mean(dis),
+         av_acc = mean(a))%>%
+  filter(frameId == max(frameId))%>%
+  select(week, gameId, playId, nflId, displayName, position, frameId, teamAbbr, quarter, down, yardsToGo, yardlineNumber, yards_to_EZ, gameClock, av_x, av_y, av_dir, av_or, av_speed, av_dis, av_acc, wasInitialPassRusher)
+
+full_data_averages
+```
+
+
+
+```{r}
+write_csv(full_data_averages, "full_data_averages.csv")
+```
+
+
+
+
+```{r}
+#Build dataset for modeling method 3 - a fixed point at 1 second
+
+full_data_fixed_point <- full_data_final %>%
+  filter(time_to_snap < 1.05 & time_to_snap > 0.95) #Because of how the tracking data is collected, not all plays have a point that is exactly 1.00000 seconds before the snap
+
+full_data_fixed_point
+```
+
+
+```{r}
+write_csv(full_data_fixed_point, "full_data_fixed_point.csv")
+```
+
+
+
+
+

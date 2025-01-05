@@ -1,0 +1,495 @@
+---
+title: "Quantifying Confusion"
+subtitle: "How NFL Defenses Leverage Unpredictability Within Pass Rush Schemes"
+author: "Douglas Byers"
+date: "12/8/2024"
+output:
+  html_document: default
+  pdf_document:
+    fig_height: 2
+    fig_width: 3.5
+editor_options: 
+  chunk_output_type: inline
+---
+## Feature Engineering and Data Testing
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+ (library(readr))
+ (library(mosaic))
+ (library(tidyverse))
+ (library(glmnet))
+ (library(class))
+ (library(modelr))
+ (library(lubridate))
+ (library(caret))
+ (library(vip)) 
+ (library(gbm))
+ (library(purrr))
+library(randomForest)
+library(lubridate)
+library(hms)
+library(ggpmisc)
+library(gt)
+```
+
+
+```{r}
+final_data <- read_csv("~/Big_Data_Bowl/final_data.csv")
+
+plays <- read_csv("~/Big_Data_Bowl/nfl-big-data-bowl-2025/plays.csv")
+
+player_pbp <- read_csv("~/Big_Data_Bowl/nfl-big-data-bowl-2025/player_play.csv")
+
+players <- read_csv("~/Big_Data_Bowl/nfl-big-data-bowl-2025/players.csv")
+
+games <- read_csv("~/Big_Data_Bowl/nfl-big-data-bowl-2025/games.csv")
+```
+
+
+```{r}
+player_pbp_data <- player_pbp %>%
+  select(gameId, playId, nflId, teamAbbr, causedPressure)
+```
+
+```{r}
+plays_data <- plays %>%
+  select(gameId, playId, quarter, down, possessionTeam, defensiveTeam, unblockedPressure, expectedPointsAdded)
+```
+
+
+
+```{r}
+#Join datasets together and create Unexpected Rate and Index
+final_data_expanded <- final_data %>%
+  left_join(player_pbp_data,
+            join_by(gameId == gameId, playId == playId, nflId == nflId, teamAbbr == teamAbbr))%>%
+  left_join(plays_data,
+            join_by(gameId == gameId, playId == playId))%>%
+  mutate(success = ifelse(expectedPointsAdded >= 0, 1, 0),
+         unexpected_rate = ifelse(unexpected_index > 0, 1, 0))%>%
+  select(week, teamAbbr, defensiveTeam, possessionTeam, quarter, down, gameId, playId, nflId, displayName, position, wasInitialPassRusher, average_prob, class, passRushOverExpected, rush_probability, drop_probability, probability_expected_action, probability_actual_action, unexpected_index, unexpected_rate, causedPressure, unblockedPressure, expectedPointsAdded, success)
+
+final_data_expanded
+```
+
+
+
+```{r}
+#Create a dataset for statistics on a play level
+play_level <- final_data_expanded %>%
+  group_by(gameId, playId, teamAbbr, week)%>%
+  summarise(UnexpectedIndex = sum(unexpected_index),
+            UnexpectedRate = mean(unexpected_rate),
+            Certainty = sum(probability_expected_action)/11,
+            Uncertainty = 1-Certainty,
+            AggresiveIndex = sum(passRushOverExpected),
+            PassRushers = sum(wasInitialPassRusher),
+            ExpectedPassRushers = sum(rush_probability),
+            EPA = mean(expectedPointsAdded),
+            success = mean(success),
+            pressure = mean(causedPressure),
+            unblocked = mean(unblockedPressure))%>%
+  mutate(ExpectedBlitz = ifelse(ExpectedPassRushers >= 4.5, 1, 0),
+         ActualBlitz = ifelse(PassRushers >= 5, 1, 0))
+play_level
+```
+
+
+
+```{r}
+#Create a dataset for data on a game by game level
+game_level <- play_level %>%
+  group_by(gameId, teamAbbr)%>%
+  summarise(UnexpectedRate = mean(UnexpectedRate),
+            UnexpectedIndex = mean(UnexpectedIndex),
+            AggresiveIndex = mean(AggresiveIndex),
+            Certainty = mean(Certainty),
+            Uncertainty = mean(Uncertainty),
+            EPA = mean(EPA),
+            SuccessRate = mean(success),
+            PressureRate = mean(pressure),
+            UnblockedPressureRate = mean(unblocked),
+            ExpectedBlitzRate = mean(ExpectedBlitz),
+            BlitzRate = mean(ActualBlitz))%>%
+  mutate(BlitzOverExpected = BlitzRate - ExpectedBlitzRate)
+
+game_level
+```
+
+
+```{r}
+#Create data on a team level
+team_level <- play_level %>%
+  group_by(teamAbbr)%>%
+  summarise(plays = n(),
+            UnexpectedRate = mean(UnexpectedRate),
+            UnexpectedIndex = mean(UnexpectedIndex),
+            AggresiveIndex = mean(AggresiveIndex),
+            Certainty = mean(Certainty),
+            Uncertainty = mean(Uncertainty),
+            EPA = mean(EPA),
+            SuccessRate = mean(success),
+            PressureRate = mean(pressure),
+            UnblockedPressureRate = mean(unblocked),
+            ExpectedBlitzRate = mean(ExpectedBlitz),
+            BlitzRate = mean(ActualBlitz))%>%
+  mutate(BlitzOverExpected = BlitzRate - ExpectedBlitzRate)
+
+team_level
+```
+
+```{r}
+write_csv(play_level, "play_level_data.csv")
+
+write_csv(final_data_expanded, "expanded_final_data.csv")
+```
+
+
+## Data Testing
+
+#### UnexpectedIndex
+
+
+
+```{r}
+#Unexpdcted Index and EPA
+play_level%>%
+  mutate(Unexpected_Index = ceiling(UnexpectedIndex))%>%
+  group_by(Unexpected_Index)%>%
+  summarise(EPA_Play = mean(EPA),
+            Plays = n())%>%
+  ggplot(aes(x = Unexpected_Index, y = EPA_Play, fill = ifelse(EPA_Play > 0, 'red', 'blue'), label = Plays))+
+  geom_col()+
+  geom_text(vjust = 1)
+```
+
+```{r}
+play_level%>%
+  mutate(UnexpectedIndex_Group = ifelse(UnexpectedIndex == 0, '0', 
+                            ifelse(UnexpectedIndex > 0 & UnexpectedIndex < 0.5, '0 < Unx < 0.5', 
+                                ifelse(UnexpectedIndex >= 0.5 & UnexpectedIndex < 1, '0.5 <Unx < 1', '1+')
+                                )
+                            )
+         )%>%
+  group_by(UnexpectedIndex_Group)%>%
+  summarise(EPA_Play = mean(EPA),
+            Plays = n())%>%
+  ggplot(aes(x = UnexpectedIndex_Group, y = EPA_Play, label = round(EPA_Play, digits = 3)))+
+  geom_col()+
+  geom_text(vjust = 1)+
+  scale_fill_gradient(high = 'red', low = 'blue')
+```
+
+
+#### Unexpected Rate
+
+```{r}
+#Unexpected Rate and EPA
+play_level%>%
+  mutate(`Unexpected Rate` = round(UnexpectedRate, digits = 3),
+         `Unexpected Players` = round(`Unexpected Rate` * 11, digits = 1))%>%
+  group_by(`Unexpected Rate`, `Unexpected Players`)%>%
+    summarize(`EPA per Play` = round(mean(EPA), digits = 3),
+            Plays = n())
+```
+
+
+
+```{r}
+#Unexpected Rate and EPA
+table1 <- play_level%>%
+  mutate(`Unexpected Rate` = round(UnexpectedRate, digits = 3),
+         `Unexpected Players` = round(`Unexpected Rate` * 11, digits = 1))%>%
+  group_by(`Unexpected Rate`, `Unexpected Players`)%>%
+    summarize(`EPA per Play` = round(mean(EPA), digits = 3),
+              `Success Rate` = round(mean(success), digits = 3),
+            Plays = n())
+
+plot1 <- play_level%>%
+  group_by(UnexpectedRate)%>%
+  summarize(EPA_Play = mean(EPA),
+            Plays = n())%>%
+  ggplot(aes(x = UnexpectedRate, y = EPA_Play, label = round(EPA_Play, digits = 3)))+
+  geom_col(fill = 'blue', color = 'black')+
+  geom_text(vjust = 1)+
+  scale_x_continuous(breaks=round(play_level$UnexpectedRate, digits = 3), position = 'top')+
+  annotate(geom = 'table',
+           x = -0.1, y = -0.75, label = list(table1))
+
+#Unexpected Rate and Success Rate
+plot2 <- play_level%>%
+  group_by(UnexpectedRate)%>%
+  summarize(SuccessRate = mean(success),
+            Plays = n())%>%
+  ggplot(aes(x = UnexpectedRate, y = SuccessRate, label = round(SuccessRate, digits = 3)))+
+  geom_col(fill = 'red', color = 'black')+
+  geom_text(vjust = -0.5)+
+  scale_x_continuous(breaks=round(play_level$UnexpectedRate, digits = 3), position = 'top')
+
+plot1
+plot2
+```
+
+```{r, figures-side, fig.show="hold", out.width="50%"}
+par(mfrow = c(2,1))
+plot2
+plot1
+```
+
+
+
+```{r}
+#Binned Unexpected Rate
+UNX_table <- play_level%>%
+  mutate(`Unexpected Players` = ifelse(UnexpectedRate == 0, "0", 
+                                     ifelse(UnexpectedRate < .1, "1", "2+")))%>%
+  group_by(`Unexpected Players`)%>%
+  summarize(`EPA per Play` = round(mean(EPA), digits = 3),
+            Plays = n())
+
+play_level%>%
+  mutate(Unexpected_Players = ifelse(UnexpectedRate == 0, "0", 
+                                     ifelse(UnexpectedRate < .1, "1", "2+")))%>%
+  group_by(Unexpected_Players)%>%
+  summarize(EPA_Play = mean(EPA),
+            Plays = n())%>%
+  ggplot(aes(x = Unexpected_Players, y = EPA_Play, label = round(EPA_Play, digits = 3)))+
+  geom_col(fill = 'blue')+
+  geom_text(vjust = 2)+
+  scale_x_discrete( position = 'top')+
+  annotate(geom = 'table',
+           x = 0.5, y = -.20, label = list(UNX_table))
+  
+
+```
+
+```{r}
+#Binned Unexpected Rate and Success Rate
+play_level%>%
+  mutate(Unexpected_Players = ifelse(UnexpectedRate == 0, "0", 
+                                     ifelse(UnexpectedRate < .1, "1", "2+")))%>%
+  group_by(Unexpected_Players)%>%
+  summarize(SuccessRate = mean(success),
+            Plays = n())%>%
+  ggplot(aes(x = Unexpected_Players, y = SuccessRate, fill = Plays, label = round(SuccessRate, digits = 3), color = Plays))+
+  geom_col()+
+  geom_text(vjust = -0.5)
+```
+
+
+```{r}
+play_level%>%
+  group_by(UnexpectedRate)%>%
+  summarize(SuccessRate = mean(success),
+            Plays = n())%>%
+  ggplot(aes(x = UnexpectedRate, y = SuccessRate, label = round(SuccessRate, digits = 3)))+
+  geom_col()+
+  geom_text(vjust = -0.5)+
+  scale_x_continuous(breaks=round(play_level$UnexpectedRate, digits = 3), position = 'top')
+```
+
+
+
+```{r}
+#Sample Distribution for EPA
+
+#Population Size
+N <- dim(play_level)[1]
+
+#number of samples
+n <- 500000
+
+#Sample size
+S <- 1300
+
+
+##Sample mean
+val = -0.164
+
+m <- mean(play_level$EPA)
+std <- sd(play_level$EPA)
+
+sample_means = rep(NA, n)
+
+#Generate the samples for our sample distribution
+for(i in 1: n){
+    sample_means[i] = mean(play_level[sample(nrow(play_level), 1300),]$EPA)
+}
+
+
+head(sample_means)
+
+# To cross check find mean and sd of sample
+# Population mean and Sample distribution mean should be equivalent (or close to it)
+m1 <-mean(sample_means)
+m
+m1
+
+s1 <-sd(sample_means)
+std
+s1
+
+#Calculate z-score of our sample within the sample distribution
+z1 = (val - m1)/s1
+z1
+```
+
+
+
+```{r}
+#Calculate p-value
+pval <- pnorm(z1)
+pval
+```
+
+```{r}
+EPA_samp_dist <- as_tibble(sample_means)%>%
+  rename(epa = value)
+
+write_csv(EPA_samp_dist, "EPA_sample_distribution.csv")
+```
+
+
+```{r}
+#Plot Sample distribution with p-value
+EPA_samp_dist%>%
+  ggplot(aes(x = epa))+
+  geom_histogram(aes(fill = ifelse(epa >= val, 'blue', 'red')), binwidth = 0.001)+
+  geom_vline(aes(xintercept = val))+
+  annotate("label", x = -0.21, y = 700, label = "p-value = 0.00088 ")+
+  annotate("label", x = -0.15, y = 3000, label = "x = -0.164 ")+
+  theme(legend.position="none",
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank())+
+  ggtitle("Distribution of Sample Mean EPA per Play")+
+  xlab("EPA per Play")+
+  ylab("")
+```
+
+
+
+
+```{r}
+#Repeat sample distribution for Success Rate
+##Sample mean
+val2 = .403
+
+sample_means2 = rep(NA, n)
+
+for(i in 1: n){
+    sample_means2[i] = mean(play_level[sample(nrow(play_level), 1300),]$success)
+}
+
+head(sample_means2)
+
+# To cross check find mean and sd of sample
+m2 <-mean(sample_means2)
+m2
+
+
+s2 <-sd(sample_means2)
+s2
+
+# To find probability
+sum(sample_means2 <= val)/length(sample_means2)
+
+
+
+z2 = (val2 - m2)/s2
+z2
+```
+
+
+```{r}
+pnorm(z2)
+```
+
+```{r}
+succRate_samp_dist <- as_tibble(sample_means2)%>%
+  rename(success = value)
+
+write_csv(succRate_samp_dist, "success_rate_sample_distribution.csv")
+```
+
+
+
+```{r}
+#Plot Success Rate Sample Distribution
+succRate_samp_dist%>%
+  ggplot(aes(x = success))+
+  geom_histogram(aes(fill = ifelse(success >= val2, 'blue', 'red')), binwidth = 0.003)+
+  geom_vline(aes(xintercept = val2))+
+  annotate("label", x = 0.39, y = 10000, label = "p-value = 0.0033")+
+  annotate("label", x = 0.405, y = 30000, label = "x = 0.403")+
+  theme(legend.position="none",
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank())+
+  ggtitle("Distribution of Sample Mean Success Rate")+
+  xlab("Success Rate")+
+  ylab("")
+```
+
+
+```{r}
+#Team level tables
+play_level %>%
+  filter(UnexpectedRate == 0)%>%
+  group_by(teamAbbr)%>%
+  summarise(Plays = n(),
+            `EPA per Play` = round(mean(EPA), digits = 3),
+            `Success Rate` = round(mean(success), digits = 3))
+
+play_level %>%
+  filter(UnexpectedRate > 0)%>%
+  group_by(teamAbbr)%>%
+  summarise(Plays = n(),
+            `Unexpected Rate` = round(mean(UnexpectedRate), digits = 3),
+            `EPA per Play` = round(mean(EPA), digits = 3),
+            `Success Rate` = round(mean(success), digits = 3))
+
+
+```
+
+
+
+```{r}
+tab1 <-play_level%>%
+  group_by(teamAbbr)%>%
+  summarise(Plays = n(),
+            `Unexpected Rate` = round(mean(UnexpectedRate), digits = 3),
+            `Total EPA per Play` = round(mean(EPA), digits = 3),
+            `Total Success Rate` = round(mean(success), digits = 3))%>%
+  rename(Team = teamAbbr)
+
+tab2 <- play_level %>%
+  filter(UnexpectedRate == 0)%>%
+  group_by(teamAbbr)%>%
+  summarise(Plays = n(),
+            `EPA per Play` = round(mean(EPA), digits = 3),
+            `Success Rate` = round(mean(success), digits = 3))
+
+
+
+tab3 <- play_level %>%
+  filter(UnexpectedRate > 0)%>%
+  group_by(teamAbbr)%>%
+  summarise(Plays = n(),
+            `Unexpected Rate` = round(mean(UnexpectedRate), digits = 3),
+            `EPA per Play` = round(mean(EPA), digits = 3),
+            `Success Rate` = round(mean(success), digits = 3))
+
+
+tab1 %>%
+  left_join(tab2,
+            join_by(Team == teamAbbr))%>%
+  left_join(tab3,
+            join_by(Team == teamAbbr))%>%
+  mutate(`EPA Diff` = `EPA per Play.y` - `EPA per Play.x`,
+         `Success Diff` = `Success Rate.y` - `Success Rate.x`)
+```
+
+
+

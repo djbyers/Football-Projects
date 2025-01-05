@@ -1,0 +1,797 @@
+---
+title: "Quantifying Confusion"
+subtitle: "How NFL Defenses Leverage Unpredictability Within Pass Rush Schemes"
+output: html_document
+date: "2024-12-17"
+---
+
+output:
+  pdf_document:
+    fig_height: 2
+    fig_width: 3.5
+  html_document: default
+editor_options: 
+  chunk_output_type: inline
+---
+## Model Selection
+
+# 1) Setup and Load Packages, Libraries, and Data
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+install.packages("dplyr")
+install.packages("nflfastR")
+install.packages("nflreadr")
+install.packages("nflplotR")
+install.packages("tidyverse")
+install.packages("vip")
+install.packages("randomForest")
+install.packages("purrr")
+install.packages("gbm")
+install.packages("mosaic")
+install.packages("glmnet")
+install.packages("caret")
+install.packages("ggrepel")
+install.packages("lubricate")
+install.packages("hms")
+
+library(dplyr)
+ (library(readr))
+ (library(mosaic))
+ (library(tidyverse))
+ (library(glmnet))
+ (library(class))
+ (library(modelr))
+ (library(lubridate))
+ (library(caret))
+ (library(vip)) 
+ (library(gbm))
+ (library(purrr))
+library(randomForest)
+library(lubridate)
+library(hms)
+```
+
+
+```{r}
+tracking_full <- read_csv("~/Big_Data_Bowl/full_tracking_data.csv")
+
+full_data_final <- read_csv("~/Big_Data_Bowl/full_data_final.csv")
+
+full_data_averages <- read_csv("~/Big_Data_Bowl/full_data_averages.csv")
+
+full_data_fixed_point <- read_csv("~/Big_Data_Bowl/full_data_fixed_point.csv")
+
+plays <- read_csv("~/Big_Data_Bowl/nfl-big-data-bowl-2025/plays.csv")
+
+player_pbp <- read_csv("~/Big_Data_Bowl/nfl-big-data-bowl-2025/player_play.csv")
+
+players <- read_csv("~/Big_Data_Bowl/nfl-big-data-bowl-2025/players.csv")
+
+games <- read_csv("~/Big_Data_Bowl/nfl-big-data-bowl-2025/games.csv")
+```
+
+
+
+##Full Data Circular Train/Test
+
+```{r}
+#Split data into train and test datasets for each week
+full_train_1 <- full_data_final%>%
+  filter(week != 1)
+
+full_test_1 <- full_data_final%>%
+  filter(week == 1)
+
+
+full_train_2 <- full_data_final%>%
+  filter(week != 2)
+
+full_test_2 <- full_data_final%>%
+  filter(week == 2)
+
+
+full_train_3 <- full_data_final%>%
+  filter(week != 3)
+
+full_test_3 <- full_data_final%>%
+  filter(week == 3)
+
+
+full_train_4 <- full_data_final%>%
+  filter(week != 4)
+
+full_test_4 <- full_data_final%>%
+  filter(week == 4)
+
+
+full_train_5 <- full_data_final%>%
+  filter(week != 5)
+
+full_test_5 <- full_data_final%>%
+  filter(week == 5)
+
+
+full_train_6 <- full_data_final%>%
+  filter(week != 6)
+
+full_test_6 <- full_data_final%>%
+  filter(week == 6)
+
+
+full_train_7 <- full_data_final%>%
+  filter(week != 7)
+
+full_test_7 <- full_data_final%>%
+  filter(week == 7)
+
+
+full_train_8 <- full_data_final%>%
+  filter(week != 8)
+
+full_test_8 <- full_data_final%>%
+  filter(week == 8)
+
+
+full_train_9 <- full_data_final%>%
+  filter(week != 9)
+
+full_test_9 <- full_data_final%>%
+  filter(week == 9)
+
+```
+
+
+
+```{r}
+#Train a model on 8 non-test weeks, test model and add predictions for test week
+
+#Repeat process for each of the 9 weeks
+
+#Week One
+log_model_full_1 <- glm(wasInitialPassRusher ~ quarter+ down+ yardsToGo+ yards_to_EZ+ gameClock+ time_to_snap + position
+                    + standard_x+ standard_y+ standard_o+ standard_dir+ s+ dis+ a,
+             data = full_train_1,
+             family = "binomial")
+
+
+log_model_full_test_1 <- full_test_1 %>%
+  add_predictions(log_model_full_1,
+                  type = "response") %>%
+  group_by(gameId, playId, nflId)%>%
+  mutate(average_prob = mean(pred))%>%
+  distinct(gameId, playId, nflId, .keep_all = TRUE)%>%
+  mutate(class = if_else(average_prob > 0.5, 1,0)) #class instead of response
+
+
+#Week 2
+log_model_full_2 <- glm(wasInitialPassRusher ~ quarter+ down+ yardsToGo+ yards_to_EZ+ gameClock+ time_to_snap + position
+                    + standard_x+ standard_y+ standard_o+ standard_dir+ s+ dis+ a,
+             data = full_train_2,
+             family = "binomial")
+
+
+log_model_full_test_2 <- full_test_2 %>%
+  add_predictions(log_model_full_2,
+                  type = "response") %>%
+  group_by(gameId, playId, nflId)%>%
+  mutate(average_prob = mean(pred))%>%
+  distinct(gameId, playId, nflId, .keep_all = TRUE)%>%
+  mutate(class = if_else(average_prob > 0.5, 1,0)) #class instead of response
+
+
+
+#Week 3
+log_model_full_3 <- glm(wasInitialPassRusher ~ quarter+ down+ yardsToGo+ yards_to_EZ+ gameClock+ time_to_snap + position
+                    + standard_x+ standard_y+ standard_o+ standard_dir+ s+ dis+ a,
+             data = full_train_3,
+             family = "binomial")
+
+
+log_model_full_test_3 <- full_test_3 %>%
+  add_predictions(log_model_full_3,
+                  type = "response") %>%
+  group_by(gameId, playId, nflId)%>%
+  mutate(average_prob = mean(pred))%>%
+  distinct(gameId, playId, nflId, .keep_all = TRUE)%>%
+  mutate(class = if_else(average_prob > 0.5, 1,0)) #class instead of response
+
+
+
+#Week 4
+log_model_full_4 <- glm(wasInitialPassRusher ~ quarter+ down+ yardsToGo+ yards_to_EZ+ gameClock+ time_to_snap + position
+                    + standard_x+ standard_y+ standard_o+ standard_dir+ s+ dis+ a,
+             data = full_train_4,
+             family = "binomial")
+
+
+log_model_full_test_4 <- full_test_4 %>%
+  add_predictions(log_model_full_4,
+                  type = "response") %>%
+  group_by(gameId, playId, nflId)%>%
+  mutate(average_prob = mean(pred))%>%
+  distinct(gameId, playId, nflId, .keep_all = TRUE)%>%
+  mutate(class = if_else(average_prob > 0.5, 1,0)) #class instead of response
+
+
+
+#Week 5
+log_model_full_5 <- glm(wasInitialPassRusher ~ quarter+ down+ yardsToGo+ yards_to_EZ+ gameClock+ time_to_snap + position
+                    + standard_x+ standard_y+ standard_o+ standard_dir+ s+ dis+ a,
+             data = full_train_5,
+             family = "binomial")
+
+
+log_model_full_test_5 <- full_test_5 %>%
+  add_predictions(log_model_full_5,
+                  type = "response") %>%
+  group_by(gameId, playId, nflId)%>%
+  mutate(average_prob = mean(pred))%>%
+  distinct(gameId, playId, nflId, .keep_all = TRUE)%>%
+  mutate(class = if_else(average_prob > 0.5, 1,0)) #class instead of response
+
+
+
+#Week 6
+log_model_full_6 <- glm(wasInitialPassRusher ~ quarter+ down+ yardsToGo+ yards_to_EZ+ gameClock+ time_to_snap + position
+                    + standard_x+ standard_y+ standard_o+ standard_dir+ s+ dis+ a,
+             data = full_train_6,
+             family = "binomial")
+
+
+log_model_full_test_6 <- full_test_6 %>%
+  add_predictions(log_model_full_6,
+                  type = "response") %>%
+  group_by(gameId, playId, nflId)%>%
+  mutate(average_prob = mean(pred))%>%
+  distinct(gameId, playId, nflId, .keep_all = TRUE)%>%
+  mutate(class = if_else(average_prob > 0.5, 1,0)) #class instead of response
+
+
+
+#Week 7
+log_model_full_7 <- glm(wasInitialPassRusher ~ quarter+ down+ yardsToGo+ yards_to_EZ+ gameClock+ time_to_snap + position
+                    + standard_x+ standard_y+ standard_o+ standard_dir+ s+ dis+ a,
+             data = full_train_7,
+             family = "binomial")
+
+
+log_model_full_test_7 <- full_test_7 %>%
+  add_predictions(log_model_full_7,
+                  type = "response") %>%
+  group_by(gameId, playId, nflId)%>%
+  mutate(average_prob = mean(pred))%>%
+  distinct(gameId, playId, nflId, .keep_all = TRUE)%>%
+  mutate(class = if_else(average_prob > 0.5, 1,0)) #class instead of response
+
+
+
+#Week 8
+log_model_full_8 <- glm(wasInitialPassRusher ~ quarter+ down+ yardsToGo+ yards_to_EZ+ gameClock+ time_to_snap + position
+                    + standard_x+ standard_y+ standard_o+ standard_dir+ s+ dis+ a,
+             data = full_train_8,
+             family = "binomial")
+
+
+log_model_full_test_8 <- full_test_8 %>%
+  add_predictions(log_model_full_8,
+                  type = "response") %>%
+  group_by(gameId, playId, nflId)%>%
+  mutate(average_prob = mean(pred))%>%
+  distinct(gameId, playId, nflId, .keep_all = TRUE)%>%
+  mutate(class = if_else(average_prob > 0.5, 1,0)) #class instead of response
+
+
+
+#Week 9
+log_model_full_9 <- glm(wasInitialPassRusher ~ quarter+ down+ yardsToGo+ yards_to_EZ+ gameClock+ time_to_snap + position
+                    + standard_x+ standard_y+ standard_o+ standard_dir+ s+ dis+ a,
+             data = full_train_9,
+             family = "binomial")
+
+
+log_model_full_test_9 <- full_test_9 %>%
+  add_predictions(log_model_full_9,
+                  type = "response") %>%
+  group_by(gameId, playId, nflId)%>%
+  mutate(average_prob = mean(pred))%>%
+  distinct(gameId, playId, nflId, .keep_all = TRUE)%>%
+  mutate(class = if_else(average_prob > 0.5, 1,0)) #class instead of response
+
+
+#Connect all test datasets together to make full predicted dataset
+log_model_test_final <- rbind(log_model_full_test_1,
+                              log_model_full_test_2,
+                              log_model_full_test_3,
+                              log_model_full_test_4,
+                              log_model_full_test_5,
+                              log_model_full_test_6,
+                              log_model_full_test_7,
+                              log_model_full_test_8,
+                              log_model_full_test_9)
+
+
+#Calculate error rate
+table(log_model_test_final$wasInitialPassRusher, log_model_test_final$class)
+(err_log_final <- with(log_model_test_final, mean(wasInitialPassRusher != class)))
+```
+
+```{r}
+example_player <- full_test_1 %>%
+  add_predictions(log_model_full_1,
+                  type = "response")%>%
+  filter(gameId == "2022091200" & playId == "85" & nflId == "42403")
+
+write_csv(example_player, "player_example.csv")
+```
+
+
+
+##Averages Data Circular Train/Test
+
+```{r}
+#Split data into train and test datasets for each week
+
+av_train_1 <- full_data_averages%>%
+  filter(week != 1)
+
+av_test_1 <- full_data_averages%>%
+  filter(week == 1)
+
+
+av_train_2 <- full_data_averages%>%
+  filter(week != 2)
+
+av_test_2 <- full_data_averages%>%
+  filter(week == 2)
+
+
+av_train_3 <- full_data_averages%>%
+  filter(week != 3)
+
+av_test_3 <- full_data_averages%>%
+  filter(week == 3)
+
+
+av_train_4 <- full_data_averages%>%
+  filter(week != 4)
+
+av_test_4 <- full_data_averages%>%
+  filter(week == 4)
+
+
+av_train_5 <- full_data_averages%>%
+  filter(week != 5)
+
+av_test_5 <- full_data_averages%>%
+  filter(week == 5)
+
+
+av_train_6 <- full_data_averages%>%
+  filter(week != 6)
+
+av_test_6 <- full_data_averages%>%
+  filter(week == 6)
+
+
+av_train_7 <- full_data_averages%>%
+  filter(week != 7)
+
+av_test_7 <- full_data_averages%>%
+  filter(week == 7)
+
+
+av_train_8 <- full_data_averages%>%
+  filter(week != 8)
+
+av_test_8 <- full_data_averages%>%
+  filter(week == 8)
+
+
+av_train_9 <- full_data_averages%>%
+  filter(week != 9)
+
+av_test_9 <- full_data_averages%>%
+  filter(week == 9)
+
+```
+
+
+
+
+```{r}
+#Train a model on 8 non-test weeks, test model and add predictions for test week
+
+#Repeat process for each of the 9 weeks
+
+
+#Week One
+log_model_avg_1 <- glm(wasInitialPassRusher ~ quarter+ down+ yardsToGo+ yards_to_EZ+ gameClock + position
+                    + av_x+ av_y+ av_or+ av_dir+ av_speed+ av_dis+ av_acc,
+             data = av_train_1,
+             family = "binomial")
+
+
+log_model_avg_test_1 <- av_test_1 %>%
+  add_predictions(log_model_avg_1,
+                  type = "response") %>%
+  mutate(class = if_else(pred > 0.5, 1,0)) #class instead of response
+
+
+#Week 2
+log_model_avg_2 <- glm(wasInitialPassRusher ~ quarter+ down+ yardsToGo+ yards_to_EZ+ gameClock + position
+                    + av_x+ av_y+ av_or+ av_dir+ av_speed+ av_dis+ av_acc,
+             data = av_train_2,
+             family = "binomial")
+
+
+log_model_avg_test_2 <- av_test_2 %>%
+  add_predictions(log_model_avg_2,
+                  type = "response") %>%
+  mutate(class = if_else(pred > 0.5, 1,0)) #class instead of response
+
+
+
+#Week 3
+log_model_avg_3 <- glm(wasInitialPassRusher ~ quarter+ down+ yardsToGo+ yards_to_EZ+ gameClock + position
+                    + av_x+ av_y+ av_or+ av_dir+ av_speed+ av_dis+ av_acc,
+             data = av_train_3,
+             family = "binomial")
+
+
+log_model_avg_test_3 <- av_test_3 %>%
+  add_predictions(log_model_avg_3,
+                  type = "response") %>%
+  mutate(class = if_else(pred > 0.5, 1,0)) #class instead of response
+
+
+
+#Week 4
+log_model_avg_4 <- glm(wasInitialPassRusher ~ quarter+ down+ yardsToGo+ yards_to_EZ+ gameClock + position
+                    + av_x+ av_y+ av_or+ av_dir+ av_speed+ av_dis+ av_acc,
+             data = av_train_4,
+             family = "binomial")
+
+
+log_model_avg_test_4 <- av_test_4 %>%
+  add_predictions(log_model_avg_4,
+                  type = "response") %>%
+  mutate(class = if_else(pred > 0.5, 1,0)) #class instead of response
+
+
+
+#Week 5
+log_model_avg_5 <- glm(wasInitialPassRusher ~ quarter+ down+ yardsToGo+ yards_to_EZ+ gameClock + position
+                    + av_x+ av_y+ av_or+ av_dir+ av_speed+ av_dis+ av_acc,
+             data = av_train_5,
+             family = "binomial")
+
+
+log_model_avg_test_5 <- av_test_5 %>%
+  add_predictions(log_model_avg_5,
+                  type = "response") %>%
+  mutate(class = if_else(pred > 0.5, 1,0)) #class instead of response
+
+
+
+#Week 6
+log_model_avg_6 <- glm(wasInitialPassRusher ~ quarter+ down+ yardsToGo+ yards_to_EZ+ gameClock + position
+                    + av_x+ av_y+ av_or+ av_dir+ av_speed+ av_dis+ av_acc,
+             data = av_train_6,
+             family = "binomial")
+
+
+log_model_avg_test_6 <- av_test_6 %>%
+  add_predictions(log_model_avg_6,
+                  type = "response") %>%
+  mutate(class = if_else(pred > 0.5, 1,0)) #class instead of response
+
+
+
+#Week 7
+log_model_avg_7 <- glm(wasInitialPassRusher ~ quarter+ down+ yardsToGo+ yards_to_EZ+ gameClock + position
+                    + av_x+ av_y+ av_or+ av_dir+ av_speed+ av_dis+ av_acc,
+             data = av_train_7,
+             family = "binomial")
+
+
+log_model_avg_test_7 <- av_test_7 %>%
+  add_predictions(log_model_avg_7,
+                  type = "response") %>%
+  mutate(class = if_else(pred > 0.5, 1,0)) #class instead of response
+
+
+
+#Week 8
+log_model_avg_8 <- glm(wasInitialPassRusher ~ quarter+ down+ yardsToGo+ yards_to_EZ+ gameClock + position
+                    + av_x+ av_y+ av_or+ av_dir+ av_speed+ av_dis+ av_acc,
+             data = av_train_8,
+             family = "binomial")
+
+
+log_model_avg_test_8 <- av_test_8 %>%
+  add_predictions(log_model_avg_8,
+                  type = "response") %>%
+  mutate(class = if_else(pred > 0.5, 1,0)) #class instead of response
+
+
+
+#Week 9
+log_model_avg_9 <- glm(wasInitialPassRusher ~ quarter+ down+ yardsToGo+ yards_to_EZ+ gameClock + position
+                    + av_x+ av_y+ av_or+ av_dir+ av_speed+ av_dis+ av_acc,
+             data = av_train_9,
+             family = "binomial")
+
+
+log_model_avg_test_9 <- av_test_9 %>%
+  add_predictions(log_model_avg_9,
+                  type = "response") %>%
+  mutate(class = if_else(pred > 0.5, 1,0)) #class instead of response
+
+
+#Connect all test datasets together to make full predicted dataset
+log_model_test_av <- rbind(log_model_avg_test_1,
+                              log_model_avg_test_2,
+                              log_model_avg_test_3,
+                              log_model_avg_test_4,
+                              log_model_avg_test_5,
+                              log_model_avg_test_6,
+                              log_model_avg_test_7,
+                              log_model_avg_test_8,
+                              log_model_avg_test_9)
+
+#Calculate Error rate
+table(log_model_test_av$wasInitialPassRusher, log_model_test_av$class)
+(err_log_av_final <- with(log_model_test_av, mean(wasInitialPassRusher != class)))
+```
+
+
+
+```{r}
+player_example_av <- av_test_1 %>%
+  add_predictions(log_model_avg_1,
+                  type = "response") %>%
+  mutate(class = if_else(pred > 0.5, 1,0))
+
+write_csv(player_example_av, "player_example_av.csv")
+```
+
+
+##Fixed Point Data Circular Train/Test
+
+```{r}
+#Split data into train and test datasets for each week
+
+fp_train_1 <- full_data_fixed_point%>%
+  filter(week != 1)
+
+fp_test_1 <- full_data_fixed_point%>%
+  filter(week == 1)
+
+
+fp_train_2 <- full_data_fixed_point%>%
+  filter(week != 2)
+
+fp_test_2 <- full_data_fixed_point%>%
+  filter(week == 2)
+
+
+fp_train_3 <- full_data_fixed_point%>%
+  filter(week != 3)
+
+fp_test_3 <- full_data_fixed_point%>%
+  filter(week == 3)
+
+
+fp_train_4 <- full_data_fixed_point%>%
+  filter(week != 4)
+
+fp_test_4 <- full_data_fixed_point%>%
+  filter(week == 4)
+
+
+fp_train_5 <- full_data_fixed_point%>%
+  filter(week != 5)
+
+fp_test_5 <- full_data_fixed_point%>%
+  filter(week == 5)
+
+
+fp_train_6 <- full_data_fixed_point%>%
+  filter(week != 6)
+
+fp_test_6 <- full_data_fixed_point%>%
+  filter(week == 6)
+
+
+fp_train_7 <- full_data_fixed_point%>%
+  filter(week != 7)
+
+fp_test_7 <- full_data_fixed_point%>%
+  filter(week == 7)
+
+
+fp_train_8 <- full_data_fixed_point%>%
+  filter(week != 8)
+
+fp_test_8 <- full_data_fixed_point%>%
+  filter(week == 8)
+
+
+fp_train_9 <- full_data_fixed_point%>%
+  filter(week != 9)
+
+fp_test_9 <- full_data_fixed_point%>%
+  filter(week == 9)
+
+```
+
+
+
+```{r}
+#Train a model on 8 non-test weeks, test model and add predictions for test week
+
+#Repeat process for each of the 9 weeks
+
+
+#Week One
+log_model_fixed_1 <- glm(wasInitialPassRusher ~ quarter+ down+ yardsToGo+ yards_to_EZ+ gameClock + position
+                    + standard_x+ standard_y+ standard_o+ standard_dir+ s+ dis+ a,
+             data = fp_train_1,
+             family = "binomial")
+
+
+log_model_fixed_test_1 <- fp_test_1 %>%
+  add_predictions(log_model_fixed_1,
+                  type = "response") %>%
+  mutate(class = if_else(pred > 0.5, 1,0)) #class instead of response
+
+
+#Week 2
+log_model_fixed_2 <- glm(wasInitialPassRusher ~ quarter+ down+ yardsToGo+ yards_to_EZ+ gameClock + position
+                    + standard_x+ standard_y+ standard_o+ standard_dir+ s+ dis+ a,
+             data = fp_train_2,
+             family = "binomial")
+
+
+log_model_fixed_test_2 <- fp_test_2 %>%
+  add_predictions(log_model_fixed_2,
+                  type = "response") %>%
+  mutate(class = if_else(pred > 0.5, 1,0)) #class instead of response
+
+
+#Week 3
+log_model_fixed_3 <- glm(wasInitialPassRusher ~ quarter+ down+ yardsToGo+ yards_to_EZ+ gameClock + position
+                    + standard_x+ standard_y+ standard_o+ standard_dir+ s+ dis+ a,
+             data = fp_train_3,
+             family = "binomial")
+
+
+log_model_fixed_test_3 <- fp_test_3 %>%
+  add_predictions(log_model_fixed_3,
+                  type = "response") %>%
+  mutate(class = if_else(pred > 0.5, 1,0)) #class instead of response
+
+
+
+#Week 4
+log_model_fixed_4 <- glm(wasInitialPassRusher ~ quarter+ down+ yardsToGo+ yards_to_EZ+ gameClock + position
+                    + standard_x+ standard_y+ standard_o+ standard_dir+ s+ dis+ a,
+             data = fp_train_4,
+             family = "binomial")
+
+
+log_model_fixed_test_4 <- fp_test_4 %>%
+  add_predictions(log_model_fixed_4,
+                  type = "response") %>%
+  mutate(class = if_else(pred > 0.5, 1,0)) #class instead of response
+
+
+#Week 5
+log_model_fixed_5 <- glm(wasInitialPassRusher ~ quarter+ down+ yardsToGo+ yards_to_EZ+ gameClock + position
+                    + standard_x+ standard_y+ standard_o+ standard_dir+ s+ dis+ a,
+             data = fp_train_5,
+             family = "binomial")
+
+
+log_model_fixed_test_5 <- fp_test_5 %>%
+  add_predictions(log_model_fixed_5,
+                  type = "response") %>%
+  mutate(class = if_else(pred > 0.5, 1,0)) #class instead of response
+
+
+
+#Week 6
+log_model_fixed_6 <- glm(wasInitialPassRusher ~ quarter+ down+ yardsToGo+ yards_to_EZ+ gameClock + position
+                    + standard_x+ standard_y+ standard_o+ standard_dir+ s+ dis+ a,
+             data = fp_train_6,
+             family = "binomial")
+
+
+log_model_fixed_test_6 <- fp_test_6 %>%
+  add_predictions(log_model_fixed_6,
+                  type = "response") %>%
+  mutate(class = if_else(pred > 0.5, 1,0)) #class instead of response
+
+
+
+#Week 7
+log_model_fixed_7 <- glm(wasInitialPassRusher ~ quarter+ down+ yardsToGo+ yards_to_EZ+ gameClock + position
+                    + standard_x+ standard_y+ standard_o+ standard_dir+ s+ dis+ a,
+             data = fp_train_7,
+             family = "binomial")
+
+
+log_model_fixed_test_7 <- fp_test_7 %>%
+  add_predictions(log_model_fixed_7,
+                  type = "response") %>%
+  mutate(class = if_else(pred > 0.5, 1,0)) #class instead of response
+
+
+
+#Week 8
+log_model_fixed_8 <- glm(wasInitialPassRusher ~ quarter+ down+ yardsToGo+ yards_to_EZ+ gameClock + position
+                    + standard_x+ standard_y+ standard_o+ standard_dir+ s+ dis+ a,
+             data = fp_train_8,
+             family = "binomial")
+
+
+log_model_fixed_test_8 <- fp_test_8 %>%
+  add_predictions(log_model_fixed_8,
+                  type = "response") %>%
+  mutate(class = if_else(pred > 0.5, 1,0)) #class instead of response
+
+
+
+#Week 9
+log_model_fixed_9 <- glm(wasInitialPassRusher ~ quarter+ down+ yardsToGo+ yards_to_EZ+ gameClock + position
+                    + standard_x+ standard_y+ standard_o+ standard_dir+ s+ dis+ a,
+             data = fp_train_9,
+             family = "binomial")
+
+
+log_model_fixed_test_9 <- fp_test_9 %>%
+  add_predictions(log_model_fixed_9,
+                  type = "response") %>%
+  mutate(class = if_else(pred > 0.5, 1,0)) #class instead of response
+
+
+#Connect all test datasets together to make full predicted dataset
+log_model_test_fp <- rbind(log_model_fixed_test_1,
+                              log_model_fixed_test_2,
+                              log_model_fixed_test_3,
+                              log_model_fixed_test_4,
+                              log_model_fixed_test_5,
+                              log_model_fixed_test_6,
+                              log_model_fixed_test_7,
+                              log_model_fixed_test_8,
+                              log_model_fixed_test_9)
+
+#Calculate Error rate
+table(log_model_test_fp$wasInitialPassRusher, log_model_test_fp$class)
+(err_log_fp_final <- with(log_model_test_fp, mean(wasInitialPassRusher != class)))
+```
+
+##Adding variables
+
+```{r}
+#Add necessary variables
+final_data <- log_model_test_final %>%
+  mutate(passRushOverExpected = wasInitialPassRusher - average_prob,
+         rush_probability = average_prob,
+         drop_probability = 1- average_prob,
+         probability_expected_action = ifelse(class == 1, rush_probability, drop_probability),
+         probability_actual_action = ifelse(wasInitialPassRusher == 1, rush_probability, drop_probability),
+         unexpected_index = probability_expected_action - probability_actual_action
+         )%>%
+  select(week, teamAbbr, gameId, playId, nflId, displayName, position, wasInitialPassRusher, average_prob, class, passRushOverExpected, rush_probability, drop_probability, probability_expected_action, probability_actual_action, unexpected_index
+         )
+
+final_data
+```
+
+
+
+```{r}
+write_csv(final_data, "final_data.csv")
+```
+
