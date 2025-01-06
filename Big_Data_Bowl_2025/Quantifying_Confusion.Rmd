@@ -640,7 +640,7 @@ tab1 %>%
   gt()%>%
   tab_header(
     title = "Rate of Unexpected Plays and EPA per Play",
-    subtitle = "Weeks 1-9, all dropbacks, excluding QB Kneels or QB Spikes"
+    subtitle = "2022 Weeks 1-9, all dropbacks, excluding QB Kneels or QB Spikes"
   )%>%
   tab_spanner(
     label = 'Overall',
